@@ -1,0 +1,56 @@
+import os
+import time
+import logging
+from scapy.all import ARP, sniff, conf
+
+# === CONFIGURATION ===
+CONFIG = {
+    "interface": "eth0",
+    "trusted_macs": {
+        "192.168.29.1": "00:11:22:33:44:55",  # Your router's IP and MAC
+    },
+    "log_file": "logs/arp_defender.log"
+}
+
+# === LOGGER SETUP ===
+os.makedirs("logs", exist_ok=True)
+logging.basicConfig(
+    filename=CONFIG["log_file"],
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger()
+
+# === ALERT + BLOCK FUNCTION WITH SOUND ===
+def alert_and_block(ip, mac):
+    logger.warning(f"[LOW] ARP spoofing detected: {ip} claimed by {mac}")
+
+    # 🔊 Play sound alert using aplay
+    try:
+        os.system("aplay sounds/alert.wav")
+    except Exception as e:
+        logger.warning(f"[!] Sound alert failed: {e}")
+
+    # 🚫 Block the MAC address using iptables
+    logger.warning(f"Blocking {mac} on {ip}")
+    os.system(f"iptables -A INPUT -m mac --mac-source {mac} -j DROP")
+
+# === PACKET HANDLER ===
+def process_packet(packet):
+    if packet.haslayer(ARP) and packet[ARP].op == 2:  # is-at (reply)
+        src_ip = packet[ARP].psrc
+        src_mac = packet[ARP].hwsrc
+
+        trusted_mac = CONFIG["trusted_macs"].get(src_ip)
+        if trusted_mac and src_mac.lower() != trusted_mac.lower():
+            alert_and_block(src_ip, src_mac)
+
+# === MAIN ===
+def main():
+    interface = CONFIG["interface"]
+    logger.info(f"[*] Monitoring ARP packets on interface: {interface}")
+    print(f"[*] Monitoring ARP packets on interface: {interface}")
+    sniff(iface=interface, filter="arp", store=0, prn=process_packet)
+
+if __name__ == "__main__":
+    main()
